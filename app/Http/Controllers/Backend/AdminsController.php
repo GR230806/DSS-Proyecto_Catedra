@@ -1,0 +1,204 @@
+<?php
+
+namespace App\Http\Controllers\Backend;
+
+use App\Http\Controllers\Controller;
+use App\Models\Admin;
+use App\Models\Sucursales;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use Spatie\Permission\Models\Role;
+
+class AdminsController extends Controller
+{
+    public $user;
+
+    public function __construct()
+    {
+        $this->middleware(function ($request, $next) {
+            $this->user = Auth::guard('admin')->user();
+            return $next($request);
+        });
+    }
+
+    /**
+     * Display a listing of the resource.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function index()
+    {
+        if (is_null($this->user) || !$this->user->can('admin.view')) {
+            abort(403, 'Sorry !! You are Unauthorized to view any admin !');
+        }
+
+        $admins = Admin::with('sucursal')->get();
+
+        return view('backend.pages.admins.index', compact('admins'));
+    }
+
+    /**
+     * Show the form for creating a new resource.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function create()
+    {
+        if (is_null($this->user) || !$this->user->can('admin.create')) {
+            abort(403, 'Sorry !! You are Unauthorized to create any admin !');
+        }
+    
+        $roles = Role::all();
+        $sucursales = Sucursales::all(); // Obtener todas las sucursales para el formulario de creación
+        return view('backend.pages.admins.create', compact('roles', 'sucursales'));
+    }
+
+    /**
+     * Store a newly created resource in storage.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\Response
+     */
+    // En el método store
+public function store(Request $request)
+{
+    if (is_null($this->user) || !$this->user->can('admin.create')) {
+        abort(403, 'Sorry !! You are Unauthorized to create any admin !');
+    }
+
+    // Validation Data
+    $request->validate([
+        'name' => 'required|max:50',
+        'email' => 'required|max:100|email|unique:admins',
+        'username' => 'required|max:100|unique:admins',
+        'password' => 'required|min:3|confirmed',
+        'sucursal_id' => 'required|exists:sucursales,id',
+        'es_duenio' => 'nullable|boolean',
+    ]);
+
+    // Create New Admin
+    $admin = new Admin();
+    $admin->name = $request->name;
+    $admin->username = $request->username;
+    $admin->email = $request->email;
+    $admin->password = Hash::make($request->password);
+    $admin->sucursal_id = $request->sucursal_id;
+    $admin->es_duenio = $request->has('es_duenio'); // True si es dueño, false si no
+    $admin->save();
+
+    if ($request->roles) {
+        $admin->assignRole($request->roles);
+    }
+
+    session()->flash('success', 'Admin has been created !!');
+    return redirect()->route('admin.admins.index');
+}
+
+
+    /**
+     * Display the specified resource.
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function show($id)
+    {
+        //
+    }
+
+    /**
+     * Show the form for editing the specified resource.
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function edit(int $id)
+    {
+        if (is_null($this->user) || !$this->user->can('admin.edit')) {
+            abort(403, 'Sorry !! You are Unauthorized to edit any admin !');
+        }
+
+        $admin = Admin::find($id);
+        $roles  = Role::all();
+        return view('backend.pages.admins.edit', compact('admin', 'roles'));
+    }
+
+    /**
+     * Update the specified resource in storage.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+// En el método update
+public function update(Request $request, int $id)
+{
+    if (is_null($this->user) || !$this->user->can('admin.edit')) {
+        abort(403, 'Sorry !! You are Unauthorized to edit any admin !');
+    }
+
+    // Validación de datos
+    $request->validate([
+        'name' => 'required|max:50',
+        'email' => 'required|max:100|email|unique:admins,email,' . $id,
+        'username' => 'required|max:100|unique:admins,username,' . $id,
+        'password' => 'nullable|min:3|confirmed',
+        'sucursal_id' => 'required|exists:sucursales,id',
+        'es_duenio' => 'required|boolean',
+    ]);
+
+    // Obtener el admin a actualizar
+    $admin = Admin::find($id);
+
+    // Actualizar los campos
+    $admin->name = $request->name;
+    $admin->email = $request->email;
+    $admin->username = $request->username;
+    $admin->sucursal_id = $request->sucursal_id;
+    $admin->es_duenio = $request->es_duenio;
+
+    // Si se proporcionó una nueva contraseña, actualizarla
+    if ($request->password) {
+        $admin->password = Hash::make($request->password);
+    }
+
+    // Guardar los cambios
+    $admin->save();
+
+    // Asignar roles si se proporcionaron
+    $admin->roles()->sync($request->roles ?? []);
+
+    session()->flash('success', 'Admin has been updated !!');
+    return back();
+}
+
+    /**
+     * Remove the specified resource from storage.
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function destroy(int $id)
+    {
+        if (is_null($this->user) || !$this->user->can('admin.delete')) {
+            abort(403, 'Sorry !! You are Unauthorized to delete any admin !');
+        }
+
+        // TODO: You can delete this in your local. This is for heroku publish.
+        // This is only for Super Admin role,
+        // so that no-one could delete or disable it by somehow.
+        if ($id === 1) {
+            session()->flash('error', 'Sorry !! You are not authorized to delete this Admin as this is the Super Admin. Please create new one if you need to test !');
+            return back();
+        }
+
+        $admin = Admin::find($id);
+        if (!is_null($admin)) {
+            $admin->delete();
+        }
+
+        session()->flash('success', 'Admin has been deleted !!');
+        return back();
+    }
+}
